@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lismore Launchpad</title>
+    <meta
+      name="description"
+      content="Lismore Launchpad dashboard homepage with secure access, KPI tracking, and modern responsive layout."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="authModal" class="auth-modal active" aria-live="polite">
+      <div class="auth-card">
+        <p class="eyebrow">Secure access</p>
+        <h2 id="authTitle">Sign in to Lismore</h2>
+        <form id="authForm" class="auth-form">
+          <label>
+            Username
+            <input id="authUsername" type="text" placeholder="Enter username" required />
+          </label>
+          <label>
+            Password
+            <input id="authPassword" type="password" placeholder="Enter password" required />
+          </label>
+          <label id="roleFieldWrap" class="role-field hidden">
+            Access level
+            <select id="authRole">
+              <option value="viewer">Viewer</option>
+              <option value="editor">Editor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <button id="authSubmit" class="primary-button" type="submit">Sign in</button>
+        </form>
+        <button id="toggleAuthMode" class="link-button" type="button">Need an account? Create one</button>
+        <p id="authStatus" class="auth-status" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="page-shell">
+      <div class="background-layer" aria-hidden="true"></div>
+      <div class="app-window" id="appShell">
+        <aside class="sidebar">
+          <div class="brand-wrap">
+            <div class="brand-mark">L</div>
+            <div>
+              <p class="eyebrow">Workspace</p>
+              <h1>Lismore</h1>
+            </div>
+          </div>
+
+          <nav class="nav" aria-label="Main navigation">
+            <button class="nav-item active" data-tab="homeTab" type="button">
+              <span class="nav-icon">⌂</span>
+              Home
+            </button>
+            <button class="nav-item" data-tab="kpiTab" type="button">
+              <span class="nav-icon">◫</span>
+              KPI Tracker
+            </button>
+            <button class="nav-item" data-tab="tasksTab" type="button">
+              <span class="nav-icon">✓</span>
+              Tasks
+            </button>
+            <button class="nav-item" data-tab="notificationsTab" type="button">
+              <span class="nav-icon">◔</span>
+              Notifications
+            </button>
+            <button class="nav-item" data-tab="syncTab" type="button">
+              <span class="nav-icon">⇄</span>
+              Data Sync
+            </button>
+          </nav>
+
+          <div class="workspace-card">
+            <p class="eyebrow muted">Launchpad</p>
+            <h2>Skincare Studio</h2>
+            <div class="workspace-progress">
+              <span></span>
+            </div>
+            <div class="workspace-meta">
+              <span>74% active</span>
+              <span>12 tasks</span>
+            </div>
+          </div>
+        </aside>
+
+        <main class="main-panel">
+          <header class="topbar">
+            <div class="searchbar">
+              <span class="search-icon">⌕</span>
+              <input type="text" placeholder="Search apps, notes, tasks" aria-label="Search" />
+            </div>
+            <div class="topbar-actions">
+              <button class="icon-button" type="button" aria-label="Notifications">◔</button>
+              <button class="icon-button" type="button" aria-label="Add new">＋</button>
+              <div class="user-pill">
+                <div id="userAvatar" class="avatar">AL</div>
+                <span id="userDisplayName">Guest</span>
+              </div>
+              <button id="resetPasswordButton" class="secondary-button signout-button" type="button">Reset password</button>
+              <button id="signOutButton" class="secondary-button signout-button" type="button">Sign out</button>
+            </div>
+          </header>
+
+          <section id="homeTab" class="content-tab active">
+            <section class="hero">
+              <div class="hero-copy">
+                <p class="eyebrow">Good morning</p>
+                <h2>Welcome back, <span id="userName">Guest</span>.</h2>
+                <p class="hero-subtitle">
+                  Here is your launch overview for the day. You have 3 important priorities and 2 new ideas flowing.
+                </p>
+              </div>
+              <div class="hero-actions">
+                <button class="primary-button" type="button">Open dashboard</button>
+                <button class="secondary-button" type="button">Quick plan</button>
+              </div>
+            </section>
+
+            <section class="status-strip" aria-label="Database status">
+              <div class="db-pill">
+                <span class="status-dot"></span>
+                Local database active
+              </div>
+              <div class="db-pill muted-pill">
+                MS Access import: coming soon
+              </div>
+            </section>
+
+            <section class="stats-grid" aria-label="Summary metrics">
+              <article class="stat-card accent-purple">
+                <div class="stat-topline">
+                  <span class="mini-label">Revenue</span>
+                  <span class="trend up">+18.4%</span>
+                </div>
+                <h3>$24.6K</h3>
+                <p>vs last week</p>
+              </article>
+              <article class="stat-card accent-teal">
+                <div class="stat-topline">
+                  <span class="mini-label">Tasks</span>
+                  <span class="trend up">+6</span>
+                </div>
+                <h3>31</h3>
+                <p>completed today</p>
+              </article>
+              <article class="stat-card accent-gold">
+                <div class="stat-topline">
+                  <span class="mini-label">Focus</span>
+                  <span class="trend neutral">8.7h</span>
+                </div>
+                <h3>87%</h3>
+                <p>deep work time</p>
+              </article>
+              <article class="stat-card accent-pink">
+                <div class="stat-topline">
+                  <span class="mini-label">Wellness</span>
+                  <span class="trend up">+2.1</span>
+                </div>
+                <h3>92</h3>
+                <p>energy score</p>
+              </article>
+            </section>
+
+            <section class="content-grid">
+              <article class="panel tasks-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow muted">Today</p>
+                    <h3>Priority sprint</h3>
+                  </div>
+                  <button class="ghost-button" type="button">View all</button>
+                </div>
+
+                <ul class="task-list">
+                  <li class="task-item done">
+                    <div class="task-check"></div>
+                    <div>
+                      <strong>Brand workshop</strong>
+                      <span>09:30 AM</span>
+                    </div>
+                  </li>
+                  <li class="task-item in-progress">
+                    <div class="task-check"></div>
+                    <div>
+                      <strong>Launch review</strong>
+                      <span>11:00 AM</span>
+                    </div>
+                  </li>
+                  <li class="task-item">
+                    <div class="task-check"></div>
+                    <div>
+                      <strong>Client onboarding</strong>
+                      <span>02:15 PM</span>
+                    </div>
+                  </li>
+                </ul>
+              </article>
+
+              <aside class="panel future-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow muted">Alerts</p>
+                    <h3>Notifications</h3>
+                  </div>
+                </div>
+
+                <ul id="notificationList" class="notification-list" aria-live="polite"></ul>
+              </aside>
+            </section>
+          </section>
+
+          <section id="kpiTab" class="content-tab">
+            <article class="panel tracker-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow muted">Sales</p>
+                  <h3>KPI Tracker</h3>
+                </div>
+                <button id="seedKpiData" class="ghost-button" type="button">Load sample data</button>
+              </div>
+
+              <div id="accessNotice" class="access-notice" role="status">
+                You need editor or admin access to update KPI data.
+              </div>
+
+              <form id="kpiForm" class="kpi-form">
+                <label>
+                  KPI name
+                  <input id="kpiName" type="text" value="Product Care $" aria-label="KPI name" />
+                </label>
+                <label>
+                  Value
+                  <input id="kpiValue" type="number" value="14500" aria-label="KPI value" />
+                </label>
+                <label>
+                  Category
+                  <select id="kpiCategory" aria-label="KPI category">
+                    <option value="Care">Product Care</option>
+                    <option value="Attach">Attach</option>
+                    <option value="Internet">Internet Security</option>
+                    <option value="Sales">Sales</option>
+                  </select>
+                </label>
+                <button class="primary-button" type="submit">Save KPI</button>
+              </form>
+
+              <div id="kpiList" class="kpi-list" aria-live="polite"></div>
+            </article>
+          </section>
+
+          <section id="tasksTab" class="content-tab">
+            <article class="panel tasks-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow muted">Operations</p>
+                  <h3>Task board</h3>
+                </div>
+              </div>
+              <ul class="task-list">
+                <li class="task-item done">
+                  <div class="task-check"></div>
+                  <div>
+                    <strong>Review KPI snapshot</strong>
+                    <span>Due today</span>
+                  </div>
+                </li>
+                <li class="task-item in-progress">
+                  <div class="task-check"></div>
+                  <div>
+                    <strong>Renewal review</strong>
+                    <span>Due Friday</span>
+                  </div>
+                </li>
+                <li class="task-item">
+                  <div class="task-check"></div>
+                  <div>
+                    <strong>Customer attach follow-up</strong>
+                    <span>Pending</span>
+                  </div>
+                </li>
+              </ul>
+            </article>
+          </section>
+
+          <section id="notificationsTab" class="content-tab">
+            <article class="panel future-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow muted">Inbox</p>
+                  <h3>Notifications</h3>
+                </div>
+              </div>
+              <ul id="notificationsDetailList" class="notification-list"></ul>
+            </article>
+          </section>
+
+          <section id="syncTab" class="content-tab">
+            <article class="panel future-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow muted">System</p>
+                  <h3>Data Sync</h3>
+                </div>
+              </div>
+
+              <div class="coming-soon-banner">
+                <span>Coming soon</span>
+                <p>Import and sync from MS Access, centralize store data, and connect live KPI feeds for future reporting.</p>
+              </div>
+
+              <div class="sync-status-box">
+                <p>Current local database: active</p>
+                <p>Users stored: <strong id="userCountLabel">0</strong></p>
+                <p>KPIs stored: <strong id="kpiCountLabel">0</strong></p>
+              </div>
+            </article>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
