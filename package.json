@@ -1,0 +1,29 @@
+{
+  "name": "harvey-norman-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "homepage": "https://itsbrendo.github.io/LismoreLaunchpad/",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "deploy": "gh-pages -d dist"
+  },
+  "dependencies": {
+    "dexie": "^4.0.2",
+    "lucide-react": "^0.453.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.7",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "gh-pages": "^6.0.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "vite": "^5.4.8"
+  }
+}
