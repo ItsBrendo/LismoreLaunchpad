@@ -6,14 +6,17 @@ import {
   Bell,
   BriefcaseBusiness,
   Download,
+  Edit3,
   FileSpreadsheet,
   Globe,
   LogOut,
   Moon,
   PackageOpen,
+  Plus,
   Settings,
   ShoppingCart,
   SunMedium,
+  Target,
   Truck,
   UserCog,
   Users,
@@ -44,12 +47,6 @@ import {
 } from './lib/import';
 import { seedRecords, seedUsers } from './data/seed';
 
-const navItems = [
-  { key: 'dashboard', label: 'Overview', icon: AreaChartIcon },
-  { key: 'imports', label: 'Imports', icon: Download },
-  { key: 'admin', label: 'User Admin', icon: UserCog },
-];
-
 const rolePalette = ['#d71920', '#ef4444', '#f97316', '#22c55e', '#38bdf8'];
 
 const initialForm = {
@@ -58,6 +55,17 @@ const initialForm = {
   role: 'Manager',
   fullName: '',
 };
+
+const defaultModules = [
+  { id: 'sales-trend', title: 'Revenue Trend', type: 'line', metric: 'sales', entity: 'salespeople' },
+  { id: 'store-mix', title: 'Store Mix', type: 'pie', metric: 'sales', entity: 'stores' },
+  { id: 'target-gap', title: 'Target Gap', type: 'bar', metric: 'target', entity: 'salespeople' },
+];
+
+const legacyModules = [
+  { id: 'legacy-overview', title: 'Basic Overview', type: 'line', metric: 'sales', entity: 'stores' },
+  { id: 'legacy-fulfillment', title: 'Legacy Fulfillment', type: 'bar', metric: 'fulfillmentRate', entity: 'stores' },
+];
 
 function formatMoney(value) {
   return new Intl.NumberFormat('en-AU', {
@@ -83,13 +91,34 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [records, setRecords] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
-  const [authState, setAuthState] = useState('login');
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [newUserForm, setNewUserForm] = useState(initialForm);
   const [importForm, setImportForm] = useState({ sourceType: 'googleSheet', sourceValue: '', fileName: '' });
   const [importStatus, setImportStatus] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [debugMode, setDebugMode] = useState(false);
+  const [customModules, setCustomModules] = useState(defaultModules);
+  const [moduleDraft, setModuleDraft] = useState({ title: '', type: 'line', metric: 'sales', entity: 'salespeople' });
+  const [salespersonUpload, setSalespersonUpload] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    salesPerson: '',
+    storeName: 'Main Store',
+    target: 12000,
+    sales: 0,
+    units: 0,
+    notes: '',
+  });
+  const [storeUpload, setStoreUpload] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    storeName: 'Main Store',
+    target: 250000,
+    sales: 0,
+    fulfillmentRate: 0,
+    status: 'Healthy',
+  });
+  const [managerEdits, setManagerEdits] = useState({});
+  const [storeEdits, setStoreEdits] = useState({});
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme);
@@ -141,30 +170,38 @@ export default function App() {
     initialize();
   }, []);
 
-  const filteredRecords = useMemo(() => {
-    if (!sessionUser) {
-      return [];
+  const navItems = useMemo(() => {
+    const items = [
+      { key: 'dashboard', label: 'Dashboard', icon: AreaChartIcon },
+      { key: 'individual', label: 'Individual Performance', icon: Users },
+      { key: 'store', label: 'Store Performance', icon: BriefcaseBusiness },
+      { key: 'eod', label: 'EOD Upload', icon: Download },
+    ];
+
+    if (sessionUser?.role === 'Manager') {
+      items.push({ key: 'admin', label: 'User Admin', icon: UserCog });
     }
 
-    if (sessionUser.role === 'Manager') {
-      return records;
-    }
+    return items;
+  }, [sessionUser]);
+
+  const filteredRecords = useMemo(() => {
+    if (!sessionUser) return [];
+
+    if (sessionUser.role === 'Manager') return records;
 
     if (sessionUser.role === 'Salesperson') {
+      const targetName = sessionUser.fullName || sessionUser.username;
       return records.filter((record) => {
-        const targetName = sessionUser.fullName || sessionUser.username;
+        const salesPerson = record.salesPerson || '';
         return (
-          record.salesPerson?.toLowerCase() === targetName.toLowerCase() ||
-          record.salesPerson?.toLowerCase().includes(targetName.toLowerCase().split(' ')[0])
+          salesPerson.toLowerCase() === targetName.toLowerCase() ||
+          salesPerson.toLowerCase().includes(targetName.toLowerCase().split(' ')[0])
         );
       });
     }
 
-    if (sessionUser.role === 'Warehouse') {
-      return records.filter((record) => record.inventory > 0 || record.fulfillmentRate > 0);
-    }
-
-    return records;
+    return records.filter((record) => record.inventory > 0 || record.fulfillmentRate > 0);
   }, [records, sessionUser]);
 
   const summaryCards = useMemo(() => {
@@ -172,8 +209,7 @@ export default function App() {
     const units = filteredRecords.reduce((sum, record) => sum + sanitizeNumber(record.units), 0);
     const avgFulfillment =
       filteredRecords.length > 0
-        ? filteredRecords.reduce((sum, record) => sum + sanitizeNumber(record.fulfillmentRate), 0) /
-          filteredRecords.length
+        ? filteredRecords.reduce((sum, record) => sum + sanitizeNumber(record.fulfillmentRate), 0) / filteredRecords.length
         : 0;
     const inventoryLevel = filteredRecords.reduce((sum, record) => sum + sanitizeNumber(record.inventory), 0);
 
@@ -212,47 +248,142 @@ export default function App() {
     }));
   }, [filteredRecords]);
 
-  const regionalData = useMemo(() => {
-    const aggregate = {};
-    filteredRecords.forEach((record) => {
-      const region = record.region || 'Unknown';
-      aggregate[region] = (aggregate[region] || 0) + sanitizeNumber(record.sales);
+  const salespeopleSummary = useMemo(() => {
+    const map = {};
+    records.forEach((record) => {
+      const name = record.salesPerson || 'Unassigned';
+      if (!map[name]) {
+        map[name] = { salesPerson: name, totalSales: 0, target: 0, units: 0 };
+      }
+      map[name].totalSales += sanitizeNumber(record.sales);
+      map[name].target += sanitizeNumber(record.target);
+      map[name].units += sanitizeNumber(record.units);
     });
+    return Object.values(map).sort((a, b) => b.totalSales - a.totalSales);
+  }, [records]);
 
-    return Object.entries(aggregate).map(([name, value]) => ({ name, value }));
-  }, [filteredRecords]);
+  const storeSummary = useMemo(() => {
+    const map = {};
+    records.forEach((record) => {
+      const name = record.storeName || 'Unknown';
+      if (!map[name]) {
+        map[name] = { storeName: name, totalSales: 0, target: 0, fulfillmentRate: 0, count: 0 };
+      }
+      map[name].totalSales += sanitizeNumber(record.sales);
+      map[name].target += sanitizeNumber(record.target);
+      map[name].fulfillmentRate += sanitizeNumber(record.fulfillmentRate);
+      map[name].count += 1;
+    });
+    return Object.values(map).map((entry) => ({
+      ...entry,
+      fulfillmentRate: Math.round(entry.fulfillmentRate / entry.count),
+    })).sort((a, b) => b.totalSales - a.totalSales);
+  }, [records]);
 
-  const topStores = useMemo(() => {
-    return [...filteredRecords]
-      .sort((a, b) => sanitizeNumber(b.sales) - sanitizeNumber(a.sales))
-      .slice(0, 5)
-      .map((record) => ({
-        name: record.storeName,
-        sales: sanitizeNumber(record.sales),
-        fulfillment: sanitizeNumber(record.fulfillmentRate),
-      }));
-  }, [filteredRecords]);
-
-  const roleTableData = useMemo(() => {
+  const recordTableRows = useMemo(() => {
     if (sessionUser?.role === 'Warehouse') {
-      return filteredRecords.slice(0, 6).map((record) => ({
+      return filteredRecords.slice(0, 5).map((record) => ({
         store: record.storeName,
-        product: record.product,
-        inventory: record.inventory,
-        fulfillment: `${record.fulfillmentRate}%`,
+        item: record.product,
+        value: record.inventory,
+        target: `${record.fulfillmentRate}%`,
         status: record.status,
       }));
     }
 
-    return filteredRecords.slice(0, 6).map((record) => ({
+    return filteredRecords.slice(0, 5).map((record) => ({
       store: record.storeName,
-      rep: record.salesPerson,
-      product: record.product,
-      sales: formatMoney(record.sales),
+      item: record.salesPerson,
+      value: formatMoney(record.sales),
       target: formatMoney(record.target),
       status: record.status,
     }));
   }, [filteredRecords, sessionUser]);
+
+  const customChartData = useMemo(() => {
+    if (sessionUser?.role === 'Salesperson') {
+      return filteredRecords.slice(-6).map((record) => ({
+        name: record.storeName || 'Store',
+        sales: sanitizeNumber(record.sales),
+        target: sanitizeNumber(record.target),
+      }));
+    }
+
+    return salespeopleSummary.slice(0, 6).map((row) => ({
+      name: row.salesPerson,
+      sales: row.totalSales,
+      target: row.target,
+    }));
+  }, [filteredRecords, salespeopleSummary, sessionUser]);
+
+  const renderModuleCard = (module) => {
+    const chartData = module.entity === 'stores'
+      ? storeSummary.slice(0, 5).map((store) => ({ name: store.storeName, sales: store.totalSales, target: store.target }))
+      : customChartData;
+
+    const commonProps = {
+      margin: { top: 10, right: 10, left: -15, bottom: 0 },
+    };
+
+    return (
+      <div key={module.id} className="card-surface p-4 sm:p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Custom module</p>
+            <h3 className="text-xl font-semibold">{module.title}</h3>
+          </div>
+          <div className="rounded-xl bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-950/60 dark:text-red-300">
+            {module.type}
+          </div>
+        </div>
+
+        <div className="h-64 w-full">
+          {module.type === 'line' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} {...commonProps}>
+                <defs>
+                  <linearGradient id={`module-fill-${module.id}`} x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="5%" stopColor="#d71920" stopOpacity={0.45} />
+                    <stop offset="95%" stopColor="#d71920" stopOpacity={0.06} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip formatter={(value) => formatMoney(value)} />
+                <Area type="monotone" dataKey="sales" stroke="#d71920" strokeWidth={3} fill={`url(#module-fill-${module.id})`} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+
+          {module.type === 'bar' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} {...commonProps}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip formatter={(value) => formatMoney(value)} />
+                <Bar dataKey="sales" fill="#d71920" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+
+          {module.type === 'pie' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={chartData} dataKey="sales" nameKey="name" innerRadius={38} outerRadius={72} paddingAngle={4}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`${entry.name}-${index}`} fill={rolePalette[index % rolePalette.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value) => formatMoney(value)} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -295,6 +426,11 @@ export default function App() {
       return;
     }
 
+    if (!newUserForm.username.trim()) {
+      setImportStatus('Username is required.');
+      return;
+    }
+
     const normalizedUsername = newUserForm.username.trim();
     const existing = await db.users.where('username').equalsIgnoreCase(normalizedUsername).first();
 
@@ -303,7 +439,7 @@ export default function App() {
       return;
     }
 
-    const hashed = await hashPassword(newUserForm.password);
+    const hashed = await hashPassword(newUserForm.password || 'Harvey123!');
     const userRecord = {
       username: normalizedUsername,
       fullName: newUserForm.fullName.trim() || normalizedUsername,
@@ -379,10 +515,146 @@ export default function App() {
     }
   };
 
+  const handleSalespersonUpload = (event) => {
+    event.preventDefault();
+    const newRecord = {
+      id: Date.now(),
+      date: salespersonUpload.date,
+      storeName: salespersonUpload.storeName,
+      region: 'Local',
+      salesPerson: sessionUser?.role === 'Salesperson' ? sessionUser.fullName || sessionUser.username : salespersonUpload.salesPerson,
+      category: 'Daily KPI',
+      product: 'Daily Sales',
+      units: Number(salespersonUpload.units || 0),
+      sales: Number(salespersonUpload.sales || 0),
+      inventory: 0,
+      fulfillmentRate: Number((Number(salespersonUpload.sales || 0) / Math.max(Number(salespersonUpload.target || 1), 1)) * 100),
+      target: Number(salespersonUpload.target || 0),
+      status: Number(salespersonUpload.sales || 0) >= Number(salespersonUpload.target || 0) ? 'Healthy' : 'Watch',
+      sourceName: 'Daily Upload',
+      createdAt: new Date().toISOString(),
+      notes: salespersonUpload.notes,
+    };
+
+    setRecords((current) => [newRecord, ...current]);
+    setSalespersonUpload({
+      date: new Date().toISOString().slice(0, 10),
+      salesPerson: sessionUser?.role === 'Salesperson' ? sessionUser.fullName || sessionUser.username : '',
+      storeName: 'Main Store',
+      target: 12000,
+      sales: 0,
+      units: 0,
+      notes: '',
+    });
+    setImportStatus('Individual performance submitted successfully.');
+  };
+
+  const handleStoreUpload = (event) => {
+    event.preventDefault();
+    const newRecord = {
+      id: Date.now(),
+      date: storeUpload.date,
+      storeName: storeUpload.storeName,
+      region: 'Regional',
+      salesPerson: 'Manager Upload',
+      category: 'Store KPI',
+      product: 'Store Performance',
+      units: 0,
+      sales: Number(storeUpload.sales || 0),
+      inventory: 0,
+      fulfillmentRate: Number(storeUpload.fulfillmentRate || 0),
+      target: Number(storeUpload.target || 0),
+      status: storeUpload.status,
+      sourceName: 'Manager EOD Upload',
+      createdAt: new Date().toISOString(),
+    };
+
+    setRecords((current) => [newRecord, ...current]);
+    setStoreUpload({
+      date: new Date().toISOString().slice(0, 10),
+      storeName: 'Main Store',
+      target: 250000,
+      sales: 0,
+      fulfillmentRate: 0,
+      status: 'Healthy',
+    });
+    setImportStatus('Store EOD performance uploaded successfully.');
+  };
+
+  const handleSalespersonEdit = (salesPerson, field, value) => {
+    const nextValue = field === 'sales' || field === 'target' ? Number(value || 0) : value;
+    setManagerEdits((current) => ({
+      ...current,
+      [salesPerson]: {
+        ...(current[salesPerson] || { sales: 0, target: 0, status: 'Healthy' }),
+        [field]: nextValue,
+      },
+    }));
+  };
+
+  const saveSalespersonEdits = (salesPerson) => {
+    const updates = managerEdits[salesPerson] || {};
+    setRecords((current) =>
+      current.map((record) => {
+        if ((record.salesPerson || '').toLowerCase() !== salesPerson.toLowerCase()) return record;
+        const nextSales = updates.sales ?? sanitizeNumber(record.sales);
+        const nextTarget = updates.target ?? sanitizeNumber(record.target);
+        const nextStatus = updates.status || (nextSales >= nextTarget ? 'Healthy' : 'Watch');
+        return {
+          ...record,
+          sales: nextSales,
+          target: nextTarget,
+          status: nextStatus,
+          fulfillmentRate: Math.min((nextSales / Math.max(nextTarget, 1)) * 100, 100),
+        };
+      })
+    );
+    setManagerEdits((current) => {
+      const next = { ...current };
+      delete next[salesPerson];
+      return next;
+    });
+  };
+
+  const handleStoreEdit = (storeName, field, value) => {
+    const nextValue = field === 'totalSales' || field === 'target' ? Number(value || 0) : value;
+    setStoreEdits((current) => ({
+      ...current,
+      [storeName]: {
+        ...(current[storeName] || { totalSales: 0, target: 0, status: 'Healthy' }),
+        [field]: nextValue,
+      },
+    }));
+  };
+
+  const saveStoreEdits = (storeName) => {
+    const updates = storeEdits[storeName] || {};
+    setRecords((current) =>
+      current.map((record) => {
+        if ((record.storeName || '').toLowerCase() !== storeName.toLowerCase()) return record;
+        const nextSales = updates.totalSales ?? sanitizeNumber(record.sales);
+        const nextTarget = updates.target ?? sanitizeNumber(record.target);
+        const nextStatus = updates.status || (nextSales >= nextTarget ? 'Healthy' : 'Watch');
+        return {
+          ...record,
+          sales: nextSales,
+          target: nextTarget,
+          status: nextStatus,
+          fulfillmentRate: Math.min((nextSales / Math.max(nextTarget, 1)) * 100, 100),
+        };
+      })
+    );
+    setStoreEdits((current) => {
+      const next = { ...current };
+      delete next[storeName];
+      return next;
+    });
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('hn-session');
     setSessionUser(null);
-    setAuthState('login');
+    setActiveView('dashboard');
   };
 
   if (!sessionUser) {
@@ -396,28 +668,28 @@ export default function App() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-[0.22em] text-red-100">Harvey Norman</p>
-                <h1 className="text-2xl font-semibold">Operations Command Center</h1>
+                <h1 className="text-2xl font-semibold">Performance Command Center</h1>
               </div>
             </div>
 
             <div className="space-y-8">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-red-100">Overview</p>
-                <h2 className="mt-3 text-4xl font-semibold">Unified retail KPI visibility.</h2>
+                <h2 className="mt-3 text-4xl font-semibold">Modular KPI reporting for teams and stores.</h2>
               </div>
 
               <div className="space-y-5 text-red-50">
                 <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-                  <p className="text-sm text-red-100">Role-based access</p>
-                  <p className="mt-2 text-xl font-medium">Manager, Salesperson, Warehouse views</p>
+                  <p className="text-sm text-red-100">Role-based workflow</p>
+                  <p className="mt-2 text-xl font-medium">Salespeople, managers and store teams</p>
                 </div>
                 <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-                  <p className="text-sm text-red-100">Local-first storage</p>
-                  <p className="mt-2 text-xl font-medium">IndexedDB with secure password hashing</p>
+                  <p className="text-sm text-red-100">Custom modules</p>
+                  <p className="mt-2 text-xl font-medium">Build dashboards around your own KPI views</p>
                 </div>
                 <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-                  <p className="text-sm text-red-100">Multi-source ingestion</p>
-                  <p className="mt-2 text-xl font-medium">Google Sheets, XLSX, CSV, Access DB</p>
+                  <p className="text-sm text-red-100">Daily EOD uploads</p>
+                  <p className="mt-2 text-xl font-medium">Personal KPI and manager-controlled store reporting</p>
                 </div>
               </div>
             </div>
@@ -481,7 +753,8 @@ export default function App() {
     );
   }
 
-  const canManageUsers = sessionUser.role === 'Manager';
+  const isManager = sessionUser.role === 'Manager';
+  const isSalesperson = sessionUser.role === 'Salesperson';
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
@@ -489,7 +762,7 @@ export default function App() {
         <aside className="w-full border-b border-slate-200 bg-white px-4 py-5 dark:border-slate-800 dark:bg-slate-900 lg:w-72 lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-3 px-2">
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/50 dark:text-red-300">
+              <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/60 dark:text-red-300">
                 <ShoppingCart className="h-5 w-5" />
               </div>
               <div>
@@ -525,7 +798,20 @@ export default function App() {
           </nav>
 
           <div className="mt-8 rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Logged in as</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Logged in as</p>
+              {isManager && (
+                <button
+                  type="button"
+                  onClick={() => setDebugMode((current) => !current)}
+                  className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                    debugMode ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  {debugMode ? 'Debug' : 'Normal'}
+                </button>
+              )}
+            </div>
             <div className="mt-3 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 font-semibold text-red-700 dark:bg-red-950/60 dark:text-red-300">
                 {sessionUser.fullName?.slice(0, 1) || sessionUser.username.slice(0, 1)}
@@ -594,186 +880,288 @@ export default function App() {
                 ))}
               </section>
 
-              <section className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_0.95fr]">
+              <section className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
                 <div className="card-surface p-4 sm:p-5">
                   <div className="mb-4 flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">Performance trend</p>
-                      <h3 className="text-xl font-semibold">Revenue momentum</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Custom modules</p>
+                      <h3 className="text-xl font-semibold">Performance workspace</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveView('individual')}
+                      className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Create module
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {customModules.map(renderModuleCard)}
+                  </div>
+                </div>
+
+                <div className="card-surface p-4 sm:p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Create</p>
+                      <h3 className="text-xl font-semibold">Module builder</h3>
+                    </div>
+                    <Target className="h-5 w-5 text-red-600" />
+                  </div>
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const title = moduleDraft.title.trim() || `${moduleDraft.type} module`;
+                      setCustomModules((current) => [{ id: Date.now().toString(), title, ...moduleDraft }, ...current]);
+                      setModuleDraft({ title: '', type: 'line', metric: 'sales', entity: 'salespeople' });
+                    }}
+                    className="space-y-4"
+                  >
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Title</label>
+                      <input
+                        className="soft-input"
+                        value={moduleDraft.title}
+                        onChange={(event) => setModuleDraft({ ...moduleDraft, title: event.target.value })}
+                        placeholder="Sales performance"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Chart type</label>
+                      <select
+                        className="soft-input"
+                        value={moduleDraft.type}
+                        onChange={(event) => setModuleDraft({ ...moduleDraft, type: event.target.value })}
+                      >
+                        <option value="line">Line</option>
+                        <option value="bar">Bar</option>
+                        <option value="pie">Pie</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Metric</label>
+                      <select
+                        className="soft-input"
+                        value={moduleDraft.metric}
+                        onChange={(event) => setModuleDraft({ ...moduleDraft, metric: event.target.value })}
+                      >
+                        <option value="sales">Sales</option>
+                        <option value="target">Target</option>
+                        <option value="fulfillmentRate">Fulfillment</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Scope</label>
+                      <select
+                        className="soft-input"
+                        value={moduleDraft.entity}
+                        onChange={(event) => setModuleDraft({ ...moduleDraft, entity: event.target.value })}
+                      >
+                        <option value="salespeople">Salespeople</option>
+                        <option value="stores">Stores</option>
+                      </select>
+                    </div>
+
+                    <button type="submit" className="w-full rounded-xl bg-harvey-red px-4 py-3 font-medium text-white hover:bg-red-700">
+                      Add custom module
+                    </button>
+                  </form>
+                </div>
+              </section>
+
+              {debugMode && (
+                <section className="mt-6 card-surface p-4 sm:p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Debug access</p>
+                      <h3 className="text-xl font-semibold">Legacy basic modules</h3>
                     </div>
                     <div className="rounded-xl bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-950/60 dark:text-red-300">
-                      Live snapshot
+                      Hidden by default
                     </div>
                   </div>
 
-                  <div className="h-80 w-full">
-                    <ResponsiveContainer>
-                      <AreaChart data={trendData}>
-                        <defs>
-                          <linearGradient id="salesFill" x1="0" x2="0" y1="0" y2="1">
-                            <stop offset="5%" stopColor="#d71920" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#d71920" stopOpacity={0.05} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" opacity={0.3} />
-                        <XAxis dataKey="name" stroke="#94a3b8" />
-                        <YAxis stroke="#94a3b8" />
-                        <Tooltip formatter={(value) => formatMoney(value)} />
-                        <Area type="monotone" dataKey="sales" stroke="#d71920" strokeWidth={3} fill="url(#salesFill)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {legacyModules.map(renderModuleCard)}
                   </div>
-                </div>
-
-                <div className="card-surface p-4 sm:p-5">
-                  <div className="mb-4">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Regional spread</p>
-                    <h3 className="text-xl font-semibold">Sales by region</h3>
-                  </div>
-
-                  <div className="h-80">
-                    <ResponsiveContainer>
-                      <PieChart>
-                        <Pie data={regionalData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={4}>
-                          {regionalData.map((entry, index) => (
-                            <Cell key={entry.name} fill={rolePalette[index % rolePalette.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value) => formatMoney(value)} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </section>
-
-              <section className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-                <div className="card-surface p-4 sm:p-5">
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">Operational view</p>
-                      <h3 className="text-xl font-semibold">{sessionUser.role === 'Warehouse' ? 'Warehouse pulse' : 'Store highlights'}</h3>
-                    </div>
-                    <div className="rounded-xl bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {filteredRecords.length} records
-                    </div>
-                  </div>
-
-                  <div className="h-72">
-                    <ResponsiveContainer>
-                      <BarChart data={topStores}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" opacity={0.3} />
-                        <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
-                        <YAxis stroke="#94a3b8" />
-                        <Tooltip formatter={(value) => formatMoney(value)} />
-                        <Bar dataKey="sales" fill="#d71920" radius={[8, 8, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="card-surface p-4 sm:p-5">
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">Fulfillment</p>
-                      <h3 className="text-xl font-semibold">Service quality</h3>
-                    </div>
-                    <Truck className="h-5 w-5 text-red-600" />
-                  </div>
-                  <div className="space-y-4">
-                    {filteredRecords.slice(0, 4).map((record) => (
-                      <div key={`${record.storeName}-${record.product}`} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-                        <div className="flex items-center justify-between gap-2 text-sm">
-                          <span className="font-medium">{record.storeName}</span>
-                          <span className="text-slate-500 dark:text-slate-300">{record.fulfillmentRate}%</span>
-                        </div>
-                        <div className="mt-3 h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-red-500 to-red-700"
-                            style={{ width: `${Math.min(record.fulfillmentRate, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
+                </section>
+              )}
             </>
-          ) : activeView === 'imports' ? (
-            <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+          ) : activeView === 'individual' ? (
+            <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
               <div className="card-surface p-5">
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/60 dark:text-red-300">
-                    <Download className="h-5 w-5" />
-                  </div>
+                <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Data ingestion</p>
-                    <h3 className="text-xl font-semibold">Unified import center</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Individual KPI</p>
+                    <h3 className="text-xl font-semibold">{isSalesperson ? 'My performance' : 'Salesperson performance'}</h3>
+                  </div>
+                  <div className="rounded-xl bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-950/60 dark:text-red-300">
+                    Daily EOD
                   </div>
                 </div>
 
-                <form onSubmit={handleImport} className="space-y-4" encType="multipart/form-data">
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Import source</label>
-                    <select
-                      className="soft-input"
-                      value={importForm.sourceType}
-                      onChange={(event) => setImportForm({ ...importForm, sourceType: event.target.value })}
-                    >
-                      <option value="googleSheet">Google Sheets</option>
-                      <option value="xlsx">XLSX</option>
-                      <option value="csv">CSV</option>
-                      <option value="access">Microsoft Access (.mdb/.accdb)</option>
-                    </select>
-                  </div>
-
-                  {importForm.sourceType === 'googleSheet' ? (
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Google Sheets URL or ID</label>
-                      <input
-                        className="soft-input"
-                        value={importForm.sourceValue}
-                        onChange={(event) => setImportForm({ ...importForm, sourceValue: event.target.value })}
-                        placeholder="https://docs.google.com/spreadsheets/... or sheet-id"
-                      />
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Upload file</label>
-                      <input
-                        className="soft-input"
-                        type="file"
-                        accept={
-                          importForm.sourceType === 'access'
-                            ? '.mdb,.accdb'
-                            : importForm.sourceType === 'csv'
-                              ? '.csv'
-                              : '.xlsx,.xls'
-                        }
-                        onChange={(event) => setImportForm({ ...importForm, fileName: event.target.files?.[0]?.name || '' })}
-                      />
-                    </div>
-                  )}
-
-                  <button type="submit" className="w-full rounded-xl bg-harvey-red px-4 py-3 font-medium text-white hover:bg-red-700">
-                    Import data
-                  </button>
-                </form>
-
-                {importStatus && (
-                  <div className="mt-4 rounded-xl border border-red-500/20 bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
-                    {importStatus}
-                  </div>
-                )}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                        <th className="pb-2 pr-4">Salesperson</th>
+                        <th className="pb-2 pr-4">Sales</th>
+                        <th className="pb-2 pr-4">Target</th>
+                        <th className="pb-2 pr-4">Units</th>
+                        {isManager && <th className="pb-2">Actions</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salespeopleSummary.map((row) => (
+                        <tr key={row.salesPerson} className="border-b border-slate-100 dark:border-slate-800">
+                          <td className="py-3 pr-4 font-medium">{row.salesPerson}</td>
+                          <td className="py-3 pr-4">
+                            {isManager ? (
+                              <input
+                                className="soft-input min-w-[120px]"
+                                value={managerEdits[row.salesPerson]?.sales ?? row.totalSales}
+                                onChange={(event) => handleSalespersonEdit(row.salesPerson, 'sales', event.target.value)}
+                              />
+                            ) : (
+                              formatMoney(row.totalSales)
+                            )}
+                          </td>
+                          <td className="py-3 pr-4">
+                            {isManager ? (
+                              <input
+                                className="soft-input min-w-[120px]"
+                                value={managerEdits[row.salesPerson]?.target ?? row.target}
+                                onChange={(event) => handleSalespersonEdit(row.salesPerson, 'target', event.target.value)}
+                              />
+                            ) : (
+                              formatMoney(row.target)
+                            )}
+                          </td>
+                          <td className="py-3 pr-4">{row.units}</td>
+                          {isManager && (
+                            <td className="py-3">
+                              <button
+                                type="button"
+                                onClick={() => saveSalespersonEdits(row.salesPerson)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-xs font-medium text-white"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                                Save
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <div className="card-surface p-5">
                 <div className="mb-4 flex items-center gap-3">
-                  <div className="rounded-xl bg-slate-100 p-2 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/60 dark:text-red-300">
                     <FileSpreadsheet className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Normalized view</p>
-                    <h3 className="text-xl font-semibold">Internal schema preview</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Daily upload</p>
+                    <h3 className="text-xl font-semibold">Submit KPI</h3>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSalespersonUpload} className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Date</label>
+                    <input
+                      type="date"
+                      className="soft-input"
+                      value={salespersonUpload.date}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, date: event.target.value })}
+                    />
+                  </div>
+
+                  {!isSalesperson && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Salesperson</label>
+                      <input
+                        className="soft-input"
+                        value={salespersonUpload.salesPerson}
+                        onChange={(event) => setSalespersonUpload({ ...salespersonUpload, salesPerson: event.target.value })}
+                        placeholder="Name of salesperson"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Store</label>
+                    <input
+                      className="soft-input"
+                      value={salespersonUpload.storeName}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, storeName: event.target.value })}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Sales</label>
+                      <input
+                        type="number"
+                        className="soft-input"
+                        value={salespersonUpload.sales}
+                        onChange={(event) => setSalespersonUpload({ ...salespersonUpload, sales: Number(event.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Target</label>
+                      <input
+                        type="number"
+                        className="soft-input"
+                        value={salespersonUpload.target}
+                        onChange={(event) => setSalespersonUpload({ ...salespersonUpload, target: Number(event.target.value) })}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Units</label>
+                    <input
+                      type="number"
+                      className="soft-input"
+                      value={salespersonUpload.units}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, units: Number(event.target.value) })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Notes</label>
+                    <textarea
+                      className="soft-input min-h-[110px]"
+                      value={salespersonUpload.notes}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, notes: event.target.value })}
+                    />
+                  </div>
+
+                  <button type="submit" className="w-full rounded-xl bg-harvey-red px-4 py-3 font-medium text-white hover:bg-red-700">
+                    Submit KPI
+                  </button>
+                </form>
+              </div>
+            </section>
+          ) : activeView === 'store' ? (
+            <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="card-surface p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Store performance</p>
+                    <h3 className="text-xl font-semibold">Branch overview</h3>
+                  </div>
+                  <div className="rounded-xl bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-950/60 dark:text-red-300">
+                    Monthly view
                   </div>
                 </div>
 
@@ -782,31 +1170,214 @@ export default function App() {
                     <thead>
                       <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
                         <th className="pb-2 pr-4">Store</th>
-                        <th className="pb-2 pr-4">Region</th>
-                        <th className="pb-2 pr-4">Product</th>
                         <th className="pb-2 pr-4">Sales</th>
-                        <th className="pb-2 pr-4">Inventory</th>
-                        <th className="pb-2">Status</th>
+                        <th className="pb-2 pr-4">Target</th>
+                        <th className="pb-2 pr-4">Fulfillment</th>
+                        {isManager && <th className="pb-2">Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {records.slice(0, 6).map((record) => (
-                        <tr key={`${record.storeName}-${record.product}-${record.date}`} className="border-b border-slate-100 dark:border-slate-800">
-                          <td className="py-3 pr-4 font-medium">{record.storeName}</td>
-                          <td className="py-3 pr-4">{record.region}</td>
-                          <td className="py-3 pr-4">{record.product}</td>
-                          <td className="py-3 pr-4">{formatMoney(record.sales)}</td>
-                          <td className="py-3 pr-4">{record.inventory}</td>
-                          <td className="py-3">
-                            <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-950/60 dark:text-green-300">
-                              {record.status}
-                            </span>
+                      {storeSummary.map((row) => (
+                        <tr key={row.storeName} className="border-b border-slate-100 dark:border-slate-800">
+                          <td className="py-3 pr-4 font-medium">{row.storeName}</td>
+                          <td className="py-3 pr-4">
+                            {isManager ? (
+                              <input
+                                className="soft-input min-w-[120px]"
+                                value={storeEdits[row.storeName]?.totalSales ?? row.totalSales}
+                                onChange={(event) => handleStoreEdit(row.storeName, 'totalSales', event.target.value)}
+                              />
+                            ) : (
+                              formatMoney(row.totalSales)
+                            )}
                           </td>
+                          <td className="py-3 pr-4">
+                            {isManager ? (
+                              <input
+                                className="soft-input min-w-[120px]"
+                                value={storeEdits[row.storeName]?.target ?? row.target}
+                                onChange={(event) => handleStoreEdit(row.storeName, 'target', event.target.value)}
+                              />
+                            ) : (
+                              formatMoney(row.target)
+                            )}
+                          </td>
+                          <td className="py-3 pr-4">{row.fulfillmentRate}%</td>
+                          {isManager && (
+                            <td className="py-3">
+                              <button
+                                type="button"
+                                onClick={() => saveStoreEdits(row.storeName)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-xs font-medium text-white"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                                Save
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <div className="card-surface p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/60 dark:text-red-300">
+                    <BarChart3 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Store KPI</p>
+                    <h3 className="text-xl font-semibold">Branch summary</h3>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {storeSummary.slice(0, 4).map((store) => (
+                    <div key={store.storeName} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                      <div className="flex items-center justify-between">
+                        <p className="font-medium">{store.storeName}</p>
+                        <span className="text-sm text-slate-500 dark:text-slate-300">{store.fulfillmentRate}%</span>
+                      </div>
+                      <div className="mt-3 h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-red-500 to-red-700"
+                          style={{ width: `${Math.min(store.fulfillmentRate, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          ) : activeView === 'eod' ? (
+            <section className="grid gap-6 xl:grid-cols-2">
+              <div className="card-surface p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/60 dark:text-red-300">
+                    <Users className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Salesperson upload</p>
+                    <h3 className="text-xl font-semibold">EOD individual performance</h3>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSalespersonUpload} className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Date</label>
+                    <input
+                      type="date"
+                      className="soft-input"
+                      value={salespersonUpload.date}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, date: event.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Salesperson</label>
+                    <input
+                      className="soft-input"
+                      value={salespersonUpload.salesPerson || sessionUser.fullName || sessionUser.username}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, salesPerson: event.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Store</label>
+                    <input
+                      className="soft-input"
+                      value={salespersonUpload.storeName}
+                      onChange={(event) => setSalespersonUpload({ ...salespersonUpload, storeName: event.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Sales</label>
+                      <input
+                        type="number"
+                        className="soft-input"
+                        value={salespersonUpload.sales}
+                        onChange={(event) => setSalespersonUpload({ ...salespersonUpload, sales: Number(event.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Target</label>
+                      <input
+                        type="number"
+                        className="soft-input"
+                        value={salespersonUpload.target}
+                        onChange={(event) => setSalespersonUpload({ ...salespersonUpload, target: Number(event.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full rounded-xl bg-harvey-red px-4 py-3 font-medium text-white hover:bg-red-700">
+                    Submit salesperson EOD KPI
+                  </button>
+                </form>
+              </div>
+
+              <div className="card-surface p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="rounded-xl bg-red-100 p-2 text-red-700 dark:bg-red-950/60 dark:text-red-300">
+                    <BriefcaseBusiness className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Manager upload</p>
+                    <h3 className="text-xl font-semibold">EOD store performance</h3>
+                  </div>
+                </div>
+
+                <form onSubmit={handleStoreUpload} className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Date</label>
+                    <input
+                      type="date"
+                      className="soft-input"
+                      value={storeUpload.date}
+                      onChange={(event) => setStoreUpload({ ...storeUpload, date: event.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Store</label>
+                    <input
+                      className="soft-input"
+                      value={storeUpload.storeName}
+                      onChange={(event) => setStoreUpload({ ...storeUpload, storeName: event.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Store sales</label>
+                      <input
+                        type="number"
+                        className="soft-input"
+                        value={storeUpload.sales}
+                        onChange={(event) => setStoreUpload({ ...storeUpload, sales: Number(event.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Target</label>
+                      <input
+                        type="number"
+                        className="soft-input"
+                        value={storeUpload.target}
+                        onChange={(event) => setStoreUpload({ ...storeUpload, target: Number(event.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Fulfillment %</label>
+                    <input
+                      type="number"
+                      className="soft-input"
+                      value={storeUpload.fulfillmentRate}
+                      onChange={(event) => setStoreUpload({ ...storeUpload, fulfillmentRate: Number(event.target.value) })}
+                    />
+                  </div>
+                  <button type="submit" className="w-full rounded-xl bg-harvey-red px-4 py-3 font-medium text-white hover:bg-red-700">
+                    Upload store EOD data
+                  </button>
+                </form>
               </div>
             </section>
           ) : (
@@ -915,12 +1486,12 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {roleTableData.map((row, index) => (
-                      <tr key={`${row.store}-${row.product}-${index}`} className="border-b border-slate-100 dark:border-slate-800">
+                    {recordTableRows.map((row, index) => (
+                      <tr key={`${row.store}-${row.item}-${index}`} className="border-b border-slate-100 dark:border-slate-800">
                         <td className="py-3 pr-4 font-medium">{row.store}</td>
-                        <td className="py-3 pr-4">{row.rep || row.product}</td>
-                        <td className="py-3 pr-4">{row.inventory || row.sales}</td>
-                        <td className="py-3 pr-4">{row.target || row.fulfillment}</td>
+                        <td className="py-3 pr-4">{row.item}</td>
+                        <td className="py-3 pr-4">{row.value}</td>
+                        <td className="py-3 pr-4">{row.target}</td>
                         <td className="py-3">
                           <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-950/60 dark:text-green-300">
                             {row.status}
